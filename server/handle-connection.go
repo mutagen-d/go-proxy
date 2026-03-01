@@ -23,20 +23,28 @@ func HandleConnection(conn net.Conn, createConnection CreateConnection) {
 	HandleHTTP(conn, buf[:n], createConnection)
 }
 
+func logConnection(dstAddr, srcAddr string) {
+	connType := ConnFilter.Filter(dstAddr)
+	ip := strings.Split(srcAddr, ":")[0]
+	fmt.Printf("%s %-8s %-12s %v\n", tools.Now(), connType, ip, dstAddr)
+}
+
+func directConnection(dstAddr, srcAddr string) (net.Conn, error) {
+	return net.Dial("tcp", dstAddr)
+}
+
 func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
 	// HTTP proxy
 	if createConnection == nil {
-		createConnection = func(dstAddr, srcAddr string) (net.Conn, error) {
-			return net.Dial("tcp", dstAddr)
-		}
+		createConnection = directConnection
 	}
 	req := tools.ParseRequest(data)
 	srcAddr := conn.RemoteAddr().String()
 	if strings.ToUpper(req.Method) == "CONNECT" {
-		fmt.Printf("%v proxy %v %v\n", tools.Now(), conn.RemoteAddr(), req.Url)
+		logConnection(req.Url, srcAddr)
 		target, err := createConnection(req.Url, srcAddr)
 		if err != nil {
-			fmt.Printf("%v Error %v\n", tools.Now(), err)
+			fmt.Printf("%v Error %v %v\n", tools.Now(), err, req.Url)
 			tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("connect error (url = %v)", req.Url))
 			return
 		}
@@ -53,7 +61,7 @@ func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
 	}
 	u, err := url.Parse(req.Url)
 	if err != nil {
-		fmt.Printf("%v Error %v\n", tools.Now(), err)
+		fmt.Printf("%v Error %v %v\n", tools.Now(), err, req.Url)
 		tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("invalid url (url = %v)", req.Url))
 		return
 	}
@@ -63,10 +71,10 @@ func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
 		port = "80"
 	}
 	origin := fmt.Sprintf("%v:%v", host, port)
-	fmt.Printf("%v proxy %v %v %v\n", tools.Now(), conn.RemoteAddr(), conn.LocalAddr(), origin)
+	logConnection(origin, srcAddr)
 	target, err := createConnection(origin, srcAddr)
 	if err != nil {
-		fmt.Printf("%v Error %v\n", tools.Now(), err)
+		fmt.Printf("%v Error %v %v\n", tools.Now(), err, origin)
 		tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("connect error (url = %v)", req.Url))
 		return
 	}
@@ -75,4 +83,3 @@ func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
 	go io.Copy(target, conn)
 	io.Copy(conn, target)
 }
-

@@ -21,6 +21,18 @@ func main() {
 	sshConnection := func(dstAddr, srcAddr string) (net.Conn, error) {
 		return sshTunnel.Forward(dstAddr, srcAddr)
 	}
+	createConnection := func(dstAddr, srcAddr string) (net.Conn, error) {
+		connType := server.ConnFilter.Filter(dstAddr)
+		switch connType {
+		case server.Proxy:
+			return sshConnection(dstAddr, srcAddr)
+		case server.Direct:
+			return net.Dial("tcp", dstAddr)
+		case server.Blocked:
+			return nil, fmt.Errorf("blocked by filter %v", dstAddr)
+		}
+		return sshTunnel.Forward(dstAddr, srcAddr)
+	}
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%v", config.Port))
 	if err != nil {
 		log.Fatal("error: ", err)
@@ -39,6 +51,6 @@ func main() {
 			fmt.Printf("%v Warning! Cant accept connection: %v\n", tools.Now(), err)
 			continue
 		}
-		go server.HandleConnection(conn, sshConnection)
+		go server.HandleConnection(conn, createConnection)
 	}
 }
