@@ -8,14 +8,20 @@ import (
 	"net"
 )
 
-var sshTunnel = server.SSHTunnel{Host: "mysite.com"}
-
-func sshConnection(dstAddr, srcAddr string) (net.Conn, error) {
-	return sshTunnel.Forward(dstAddr, srcAddr)
-}
-
 func main() {
-	listener, err := net.Listen("tcp", "127.0.0.1:8080")
+	config := tools.ParseConfig()
+	var sshTunnel = server.SSHTunnel{
+		User: config.SSHUser,
+		Host: config.SSHHostname,
+		Port: config.SSHPort,
+		Password: config.SSHPassword,
+		PrivateKeyPath: config.SSHKeyPath,
+	}
+
+	sshConnection := func(dstAddr, srcAddr string) (net.Conn, error) {
+		return sshTunnel.Forward(dstAddr, srcAddr)
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%v", config.Port))
 	if err != nil {
 		log.Fatal("error: ", err)
 	}
