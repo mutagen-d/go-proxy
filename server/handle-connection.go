@@ -65,10 +65,13 @@ func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
 		tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("invalid url (url = %v)", req.Url))
 		return
 	}
-	host := u.Host
+	host := u.Hostname()
 	port := u.Port()
-	if port == "" {
+	if port == "" && (u.Scheme == "http" || u.Scheme == "ws") {
 		port = "80"
+	}
+	if port == "" && (u.Scheme == "https" || u.Scheme == "wss") {
+		port = "443"
 	}
 	origin := fmt.Sprintf("%v:%v", host, port)
 	logConnection(origin, srcAddr)
