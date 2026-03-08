@@ -1,16 +1,19 @@
 package tools
 
 import (
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 type HttpRequest struct {
-	Method string
-	Url string
+	Method  string
+	Url     string
 	Version string
 	Headers map[string]string
-	Body []byte
+	Body    []byte
 }
 
 func ParseRequest(data []byte) HttpRequest {
@@ -43,13 +46,81 @@ func IsSupportedMethod(method string) bool {
 	return false
 }
 
+type FixHttp struct {
+	Reader io.Reader
+	buf    []byte
+}
+
+func (r *FixHttp) Read(p []byte) (n int, err error) {
+	n, err = r.Reader.Read(p)
+	if n > 0 {
+		// fmt.Printf("fixed:\n%v\n", string(p[:n]))
+		transformed, ferr := FixHttpRequest(p[:n])
+		if ferr != nil {
+			return n, ferr
+		}
+		copy(p, transformed)
+		n = len(transformed)
+	}
+	return n, err
+}
+func FixFast(data []byte, origin string) []byte {
+	s := string(data)
+	r := fmt.Sprintf("http://%v", origin)
+	return []byte(strings.Replace(s, r, "", 1))
+}
+func FixHttpRequest(data []byte) ([]byte, error) {
+	req := HttpRequest{}
+	req.Parse(data)
+	if !strings.HasPrefix(req.Url, "http:") &&
+		!strings.HasPrefix(req.Url, "ws:") &&
+		!strings.HasPrefix(req.Url, "wss:") &&
+		!strings.HasPrefix(req.Url, "https:") {
+		return data, nil
+	}
+	u, err := url.Parse(req.Url)
+	if err != nil {
+		return nil, err
+	}
+	xHost := req.Headers["host"]
+	if xHost == "" {
+		req.Headers["host"] = u.Host
+	}
+	req.Url = u.Path
+	return []byte(req.Serialize()), nil
+}
+
+func (r *HttpRequest) Log() string {
+	const SEP = "\r\n"
+	var content strings.Builder
+	fmt.Fprintf(&content, "%v %v HTTP/1.1%v", r.Method, r.Url, SEP)
+	for key, value := range r.Headers {
+		fmt.Fprintf(&content, "%v: %v%v", key, value, SEP)
+	}
+	fmt.Fprintf(&content, "%v: %v%v", "Body-Length", len(r.Body), SEP)
+	content.WriteString(SEP)
+	return content.String()
+}
+
+func (r *HttpRequest) Serialize() string {
+	const SEP = "\r\n"
+	var content strings.Builder
+	fmt.Fprintf(&content, "%v %v HTTP/1.1%v", r.Method, r.Url, SEP)
+	for key, value := range r.Headers {
+		fmt.Fprintf(&content, "%v: %v%v", key, value, SEP)
+	}
+	content.WriteString(SEP)
+	content.WriteString(string(r.Body))
+	return content.String()
+}
+
 func (r *HttpRequest) Parse(data []byte) {
 	const LF = 0x0A
 	const CR = 0x0D
 	var headers []string
 	for i, offset := 0, 0; i < len(data); i += 1 {
-		if data[i] == LF &&  i < len(data) - 1 && data[i + 1] == LF {
-			copy(r.Body, data[i + 2:])
+		if data[i] == LF && i < len(data)-1 && data[i+1] == LF {
+			copy(r.Body, data[i+2:])
 			break
 		}
 		if data[i] == LF {

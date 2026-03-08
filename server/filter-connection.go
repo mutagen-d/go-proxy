@@ -40,7 +40,7 @@ func (m *ConnectionFilter) Filter(dstAddr string) ConnectionType {
 
 var ConnFilter = ConnectionFilter{
 	Blocked: []*regexp.Regexp{
-		regexp.MustCompile("^(localhost|127\\.0\\.0\\.1)$"), // localhost
-		regexp.MustCompile("^(10\\.\\d+\\.\\d+\\.\\d+|172\\.(?:1[6-9]|2[0-9]|3[01])\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+)$"), // private IP
+		regexp.MustCompile(`^(localhost|127\.0\.0\.1)$`), // localhost
+		regexp.MustCompile(`^(10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2[0-9]|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)$`), // private IP
 	},
 }

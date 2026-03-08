@@ -3,9 +3,8 @@ package server
 import (
 	"fmt"
 	"go-proxy/tools"
-	"io"
 	"net"
-	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -20,69 +19,54 @@ func HandleConnection(conn net.Conn, createConnection CreateConnection) {
 		tools.Send(conn, 500, "Internal Server Error", "read error")
 		return
 	}
-	HandleHTTP(conn, buf[:n], createConnection)
+	if isSocks4(buf[:n]) {
+		Socks4Proxy(conn, buf[:n], createConnection)
+	} else if isSocks5(buf[:n]) {
+		Socks5Proxy(conn, buf[:n], createConnection)
+	} else if isHttp(buf[:n]) {
+		HandleHTTP(conn, buf[:n], createConnection)
+	} else {
+		// TODO
+		fmt.Printf("%v error!\n", tools.Now())
+	}
 }
 
-func logConnection(dstAddr, srcAddr string) {
+func logConnection(dstAddr, srcAddr string, proto string) {
 	connType := ConnFilter.Filter(dstAddr)
 	ip := strings.Split(srcAddr, ":")[0]
-	fmt.Printf("%s %-8s %-12s %v\n", tools.Now(), connType, ip, dstAddr)
+	fmt.Printf("%s %-8s %-8s %-12s %v\n", tools.Now(), connType, strings.ToUpper(proto), ip, dstAddr)
 }
 
 func directConnection(dstAddr, srcAddr string) (net.Conn, error) {
 	return net.Dial("tcp", dstAddr)
 }
 
-func HandleHTTP(conn net.Conn, data []byte, createConnection CreateConnection) {
-	// HTTP proxy
-	if createConnection == nil {
-		createConnection = directConnection
+func isSocks5(data []byte) bool {
+	if data[0] != 0x05 {
+		return false
 	}
+	if len(data) < 2 {
+		return false
+	}
+	size := data[1]
+	if len(data) < (2 + int(size)) {
+		return false
+	}
+	auth := data[2:2+size]
+	return slices.Contains(auth, 0x00) || slices.Contains(auth, 0x02)
+}
+
+func isSocks4(data []byte) bool {
+	if data[0] != 0x04 {
+		return false
+	}
+	if len(data) < 2 {
+		return false
+	}
+	return data[1] == 0x01 || data[1] == 0x02 || data[1] == 0x03
+}
+
+func isHttp(data []byte) bool {
 	req := tools.ParseRequest(data)
-	srcAddr := conn.RemoteAddr().String()
-	if strings.ToUpper(req.Method) == "CONNECT" {
-		logConnection(req.Url, srcAddr)
-		target, err := createConnection(req.Url, srcAddr)
-		if err != nil {
-			fmt.Printf("%v Error %v %v\n", tools.Now(), err, req.Url)
-			tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("connect error (url = %v)", req.Url))
-			return
-		}
-		tools.Send(conn, 200, "OK", "")
-		defer target.Close()
-		go io.Copy(target, conn)
-		io.Copy(conn, target)
-		return
-	}
-	if !tools.IsSupportedMethod(req.Method) {
-		fmt.Printf("%v Unsupported Method %v\n", tools.Now(), req.Method)
-		tools.Send(conn, 405, "Unsupported Method", "")
-		return
-	}
-	u, err := url.Parse(req.Url)
-	if err != nil {
-		fmt.Printf("%v Error %v %v\n", tools.Now(), err, req.Url)
-		tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("invalid url (url = %v)", req.Url))
-		return
-	}
-	host := u.Hostname()
-	port := u.Port()
-	if port == "" && (u.Scheme == "http" || u.Scheme == "ws") {
-		port = "80"
-	}
-	if port == "" && (u.Scheme == "https" || u.Scheme == "wss") {
-		port = "443"
-	}
-	origin := fmt.Sprintf("%v:%v", host, port)
-	logConnection(origin, srcAddr)
-	target, err := createConnection(origin, srcAddr)
-	if err != nil {
-		fmt.Printf("%v Error %v %v\n", tools.Now(), err, origin)
-		tools.Send(conn, 500, "Internal Server Error", fmt.Sprintf("connect error (url = %v)", req.Url))
-		return
-	}
-	defer target.Close()
-	target.Write(data)
-	go io.Copy(target, conn)
-	io.Copy(conn, target)
+	return tools.IsSupportedMethod(req.Method)
 }
